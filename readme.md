@@ -37,7 +37,6 @@ A comprehensive WooCommerce checkout field formatter that automatically converts
    │       └── checkout-uppercase.js
    └── changelog.md
    └── readme.md
-   
    ```
 3. Upload the `woocommerce-checkout-uppercase` folder to `/wp-content/plugins/`
 4. Activate the plugin through the 'Plugins' menu in WordPress
