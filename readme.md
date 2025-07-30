@@ -26,13 +26,12 @@ Automatically converts all lowercase characters to uppercase in WooCommerce chec
 1. Download the plugin files
 2. Create the following directory structure:
    ```
-woocommerce-checkout-uppercase/
-├── woocommerce-checkout-uppercase.php
-├── uninstall.php
-├── assets/
-│   └── js/
-│       └── checkout-uppercase.js
-└── readme.md
+   woocommerce-checkout-uppercase/
+   ├── woocommerce-checkout-uppercase.php
+   ├── assets/
+   │   └── js/
+   │       └── checkout-uppercase.js
+   └── readme.md
    ```
 3. Upload the `woocommerce-checkout-uppercase` folder to `/wp-content/plugins/`
 4. Activate the plugin through the 'Plugins' menu in WordPress
