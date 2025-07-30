@@ -222,7 +222,7 @@ A: Yes, the plugin only formats data and doesn't store or transmit any personal 
 See CHANGELOG.md for detailed version history.
 Support
 For support, feature requests, or bug reports, please visit:
-https://github.com/mikelvd/wc-checkout-uppercase
+https://github.com/MikeLvd/woocommerce-checkout-uppercase
 
 ### Contributing
 
