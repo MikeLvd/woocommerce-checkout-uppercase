@@ -3,7 +3,7 @@
  * Plugin Name: WooCommerce Checkout Field Uppercase Converter
  * Plugin URI: https://github.com/mikelvd/wc-checkout-uppercase
  * Description: Automatically converts all lowercase characters to uppercase in WooCommerce checkout billing and shipping fields. Supports both Greek and Latin characters.
- * Version: 1.0.0
+ * Version: 1.0.1
  * Requires at least: 6.8
  * Requires PHP: 8.0
  * Author: Mike Lvd
@@ -34,7 +34,7 @@ final class CheckoutFieldUppercase {
     /**
      * Plugin version
      */
-    const VERSION = '1.0.0';
+    private const VERSION = '1.0.1';
     
     /**
      * Plugin instance
@@ -42,24 +42,30 @@ final class CheckoutFieldUppercase {
     private static ?self $instance = null;
     
     /**
+     * Transliterator instance cache
+     */
+    private static ?\Transliterator $transliterator = null;
+    
+    /**
      * Fields to process (only text inputs, not selects)
+     * Removed country and state as they are select fields
      */
     private array $fields_to_process = [
         'billing' => [
             'billing_first_name',
             'billing_last_name',
-            'billing_country',
+            'billing_company',
             'billing_address_1',
-            'billing_city',
-            'billing_state'
+            'billing_address_2',
+            'billing_city'
         ],
         'shipping' => [
             'shipping_first_name',
             'shipping_last_name',
-            'shipping_country',
+            'shipping_company',
             'shipping_address_1',
-            'shipping_city',
-            'shipping_state'
+            'shipping_address_2',
+            'shipping_city'
         ],
         'order' => [
             'order_comments'
@@ -67,20 +73,30 @@ final class CheckoutFieldUppercase {
     ];
     
     /**
-     * Greek to uppercase mapping (without accents as per Greek typography rules)
+     * Comprehensive Greek to uppercase mapping (without accents as per Greek typography rules)
      */
     private array $greek_uppercase_map = [
+        // Basic lowercase to uppercase
         'α' => 'Α', 'β' => 'Β', 'γ' => 'Γ', 'δ' => 'Δ', 'ε' => 'Ε',
         'ζ' => 'Ζ', 'η' => 'Η', 'θ' => 'Θ', 'ι' => 'Ι', 'κ' => 'Κ',
         'λ' => 'Λ', 'μ' => 'Μ', 'ν' => 'Ν', 'ξ' => 'Ξ', 'ο' => 'Ο',
         'π' => 'Π', 'ρ' => 'Ρ', 'σ' => 'Σ', 'ς' => 'Σ', 'τ' => 'Τ',
         'υ' => 'Υ', 'φ' => 'Φ', 'χ' => 'Χ', 'ψ' => 'Ψ', 'ω' => 'Ω',
+        
         // Accented vowels convert to non-accented uppercase
         'ά' => 'Α', 'έ' => 'Ε', 'ή' => 'Η', 'ί' => 'Ι', 'ό' => 'Ο',
         'ύ' => 'Υ', 'ώ' => 'Ω', 'ΐ' => 'Ι', 'ΰ' => 'Υ',
+        'ἀ' => 'Α', 'ἁ' => 'Α', 'ἂ' => 'Α', 'ἃ' => 'Α', 'ἄ' => 'Α', 'ἅ' => 'Α',
+        'ἐ' => 'Ε', 'ἑ' => 'Ε', 'ἒ' => 'Ε', 'ἓ' => 'Ε', 'ἔ' => 'Ε', 'ἕ' => 'Ε',
+        'ἠ' => 'Η', 'ἡ' => 'Η', 'ἢ' => 'Η', 'ἣ' => 'Η', 'ἤ' => 'Η', 'ἥ' => 'Η',
+        'ἰ' => 'Ι', 'ἱ' => 'Ι', 'ἲ' => 'Ι', 'ἳ' => 'Ι', 'ἴ' => 'Ι', 'ἵ' => 'Ι',
+        'ὀ' => 'Ο', 'ὁ' => 'Ο', 'ὂ' => 'Ο', 'ὃ' => 'Ο', 'ὄ' => 'Ο', 'ὅ' => 'Ο',
+        'ὐ' => 'Υ', 'ὑ' => 'Υ', 'ὒ' => 'Υ', 'ὓ' => 'Υ', 'ὔ' => 'Υ', 'ὕ' => 'Υ',
+        'ὠ' => 'Ω', 'ὡ' => 'Ω', 'ὢ' => 'Ω', 'ὣ' => 'Ω', 'ὤ' => 'Ω', 'ὥ' => 'Ω',
+        
         // Handle uppercase accented letters (remove accents)
         'Ά' => 'Α', 'Έ' => 'Ε', 'Ή' => 'Η', 'Ί' => 'Ι', 'Ό' => 'Ο',
-        'Ύ' => 'Υ', 'Ώ' => 'Ω'
+        'Ύ' => 'Υ', 'Ώ' => 'Ω', 'Ϊ' => 'Ι', 'Ϋ' => 'Υ'
     ];
     
     /**
@@ -121,12 +137,6 @@ final class CheckoutFieldUppercase {
         
         // Process order meta data
         add_action('woocommerce_checkout_create_order', [$this, 'process_order_data'], 10, 2);
-        
-        // Convert country names to uppercase
-        add_filter('woocommerce_countries', [$this, 'convert_countries_to_uppercase'], 999);
-        
-        // Convert state names to uppercase
-        add_filter('woocommerce_states', [$this, 'convert_states_to_uppercase'], 999);
     }
     
     /**
@@ -143,6 +153,25 @@ final class CheckoutFieldUppercase {
     }
     
     /**
+     * Get or create Transliterator instance
+     */
+    private function get_transliterator(): ?\Transliterator {
+        if (self::$transliterator === null && class_exists('\Transliterator')) {
+            $remove_greek_accents = apply_filters('wc_checkout_uppercase_remove_greek_accents', true);
+            
+            if ($remove_greek_accents) {
+                // Create a compound transliterator that removes accents and converts to uppercase
+                self::$transliterator = \Transliterator::create('NFD; [:Nonspacing Mark:] Remove; NFC; Any-Upper');
+            } else {
+                // Just uppercase
+                self::$transliterator = \Transliterator::create('Any-Upper');
+            }
+        }
+        
+        return self::$transliterator;
+    }
+    
+    /**
      * Convert string to uppercase with Greek support (removes accents)
      */
     private function to_uppercase(string $text): string {
@@ -150,38 +179,21 @@ final class CheckoutFieldUppercase {
             return $text;
         }
         
-        /**
-         * Filter to control whether Greek accents should be removed in uppercase
-         * 
-         * @param bool $remove_accents Whether to remove accents (default: true)
-         * @return bool
-         */
+        // Filter to control whether Greek accents should be removed
         $remove_greek_accents = apply_filters('wc_checkout_uppercase_remove_greek_accents', true);
         
-        // Apply Greek character conversion
-        if ($remove_greek_accents) {
-            // Use map that removes accents
-            $text = strtr($text, $this->greek_uppercase_map);
+        // Try Transliterator first (most efficient for Unicode)
+        $transliterator = $this->get_transliterator();
+        if ($transliterator !== null) {
+            $result = $transliterator->transliterate($text);
+            if ($result !== false) {
+                return $result;
+            }
         }
         
-        // Use Transliterator if available (PHP intl extension)
-        if (class_exists('\Transliterator')) {
-            if ($remove_greek_accents) {
-                // First remove diacritics/accents
-                $removeAccents = \Transliterator::create('NFD; [:Nonspacing Mark:] Remove; NFC');
-                if ($removeAccents !== null) {
-                    $text = $removeAccents->transliterate($text);
-                }
-            }
-            
-            // Then convert to uppercase
-            $toUpper = \Transliterator::create('Any-Upper');
-            if ($toUpper !== null) {
-                $result = $toUpper->transliterate($text);
-                if ($result !== false) {
-                    return $result;
-                }
-            }
+        // Fallback: Apply Greek character conversion manually
+        if ($remove_greek_accents) {
+            $text = strtr($text, $this->greek_uppercase_map);
         }
         
         // Use mb_strtoupper if available
@@ -189,7 +201,7 @@ final class CheckoutFieldUppercase {
             return mb_strtoupper($text, 'UTF-8');
         }
         
-        // Fallback: Convert Latin characters
+        // Last resort: strtoupper (only works for ASCII)
         return strtoupper($text);
     }
     
@@ -207,7 +219,7 @@ final class CheckoutFieldUppercase {
         
         // Check if the string is UTF-8
         if (!seems_utf8($value)) {
-            $value = utf8_encode($value);
+            $value = mb_convert_encoding($value, 'UTF-8', mb_detect_encoding($value));
         }
         
         // Convert to uppercase
@@ -239,11 +251,9 @@ final class CheckoutFieldUppercase {
         }
         
         // Process order fields
-        if (isset($this->fields_to_process['order'])) {
-            foreach ($this->fields_to_process['order'] as $field) {
-                if (isset($_POST[$field])) {
-                    $_POST[$field] = $this->sanitize_and_convert($_POST[$field]);
-                }
+        foreach ($this->fields_to_process['order'] as $field) {
+            if (isset($_POST[$field])) {
+                $_POST[$field] = $this->sanitize_and_convert($_POST[$field]);
             }
         }
     }
@@ -256,7 +266,7 @@ final class CheckoutFieldUppercase {
         $all_fields = array_merge(
             $this->fields_to_process['billing'],
             $this->fields_to_process['shipping'],
-            $this->fields_to_process['order'] ?? []
+            $this->fields_to_process['order']
         );
         
         foreach ($all_fields as $field) {
@@ -272,76 +282,54 @@ final class CheckoutFieldUppercase {
      * Process order data before saving
      */
     public function process_order_data(\WC_Order $order, array $data): void {
-        // Process billing first name
-        $billing_first_name = $order->get_billing_first_name();
-        if (!empty($billing_first_name)) {
-            $order->set_billing_first_name($this->sanitize_and_convert($billing_first_name));
+        // Define field mappings for better maintainability
+        $field_mappings = [
+            'billing' => [
+                'first_name' => 'billing_first_name',
+                'last_name' => 'billing_last_name',
+                'company' => 'billing_company',
+                'address_1' => 'billing_address_1',
+                'address_2' => 'billing_address_2',
+                'city' => 'billing_city'
+            ],
+            'shipping' => [
+                'first_name' => 'shipping_first_name',
+                'last_name' => 'shipping_last_name',
+                'company' => 'shipping_company',
+                'address_1' => 'shipping_address_1',
+                'address_2' => 'shipping_address_2',
+                'city' => 'shipping_city'
+            ]
+        ];
+        
+        // Process billing fields
+        foreach ($field_mappings['billing'] as $prop => $field_name) {
+            if (in_array($field_name, $this->fields_to_process['billing'])) {
+                $getter = 'get_billing_' . $prop;
+                $setter = 'set_billing_' . $prop;
+                
+                if (method_exists($order, $getter) && method_exists($order, $setter)) {
+                    $value = $order->$getter();
+                    if (!empty($value)) {
+                        $order->$setter($this->sanitize_and_convert($value));
+                    }
+                }
+            }
         }
         
-        // Process billing last name
-        $billing_last_name = $order->get_billing_last_name();
-        if (!empty($billing_last_name)) {
-            $order->set_billing_last_name($this->sanitize_and_convert($billing_last_name));
-        }
-        
-        // Process billing country
-        $billing_country = $order->get_billing_country();
-        if (!empty($billing_country)) {
-            $order->set_billing_country($this->sanitize_and_convert($billing_country));
-        }
-        
-        // Process billing address 1
-        $billing_address_1 = $order->get_billing_address_1();
-        if (!empty($billing_address_1)) {
-            $order->set_billing_address_1($this->sanitize_and_convert($billing_address_1));
-        }
-        
-        // Process billing city
-        $billing_city = $order->get_billing_city();
-        if (!empty($billing_city)) {
-            $order->set_billing_city($this->sanitize_and_convert($billing_city));
-        }
-        
-        // Process billing state
-        $billing_state = $order->get_billing_state();
-        if (!empty($billing_state)) {
-            $order->set_billing_state($this->sanitize_and_convert($billing_state));
-        }
-        
-        // Process shipping first name
-        $shipping_first_name = $order->get_shipping_first_name();
-        if (!empty($shipping_first_name)) {
-            $order->set_shipping_first_name($this->sanitize_and_convert($shipping_first_name));
-        }
-        
-        // Process shipping last name
-        $shipping_last_name = $order->get_shipping_last_name();
-        if (!empty($shipping_last_name)) {
-            $order->set_shipping_last_name($this->sanitize_and_convert($shipping_last_name));
-        }
-        
-        // Process shipping country
-        $shipping_country = $order->get_shipping_country();
-        if (!empty($shipping_country)) {
-            $order->set_shipping_country($this->sanitize_and_convert($shipping_country));
-        }
-        
-        // Process shipping address 1
-        $shipping_address_1 = $order->get_shipping_address_1();
-        if (!empty($shipping_address_1)) {
-            $order->set_shipping_address_1($this->sanitize_and_convert($shipping_address_1));
-        }
-        
-        // Process shipping city
-        $shipping_city = $order->get_shipping_city();
-        if (!empty($shipping_city)) {
-            $order->set_shipping_city($this->sanitize_and_convert($shipping_city));
-        }
-        
-        // Process shipping state
-        $shipping_state = $order->get_shipping_state();
-        if (!empty($shipping_state)) {
-            $order->set_shipping_state($this->sanitize_and_convert($shipping_state));
+        // Process shipping fields
+        foreach ($field_mappings['shipping'] as $prop => $field_name) {
+            if (in_array($field_name, $this->fields_to_process['shipping'])) {
+                $getter = 'get_shipping_' . $prop;
+                $setter = 'set_shipping_' . $prop;
+                
+                if (method_exists($order, $getter) && method_exists($order, $setter)) {
+                    $value = $order->$getter();
+                    if (!empty($value)) {
+                        $order->$setter($this->sanitize_and_convert($value));
+                    }
+                }
+            }
         }
         
         // Process order comments (customer note)
@@ -349,30 +337,6 @@ final class CheckoutFieldUppercase {
         if (!empty($customer_note)) {
             $order->set_customer_note($this->sanitize_and_convert($customer_note));
         }
-    }
-    
-    /**
-     * Convert all country names to uppercase
-     */
-    public function convert_countries_to_uppercase(array $countries): array {
-        foreach ($countries as $code => $name) {
-            $countries[$code] = $this->to_uppercase($name);
-        }
-        return $countries;
-    }
-    
-    /**
-     * Convert all state names to uppercase
-     */
-    public function convert_states_to_uppercase(array $states): array {
-        foreach ($states as $country_code => $country_states) {
-            if (is_array($country_states)) {
-                foreach ($country_states as $state_code => $state_name) {
-                    $states[$country_code][$state_code] = $this->to_uppercase($state_name);
-                }
-            }
-        }
-        return $states;
     }
     
     /**
@@ -384,16 +348,30 @@ final class CheckoutFieldUppercase {
         
         // Process billing fields
         foreach ($billing_data as $key => $value) {
-            if (in_array('billing_' . $key, $this->fields_to_process['billing'])) {
-                $order->set_billing_prop($key, $this->sanitize_and_convert($value));
+            $field_name = 'billing_' . $key;
+            if (in_array($field_name, $this->fields_to_process['billing']) && !empty($value)) {
+                $setter = 'set_billing_' . $key;
+                if (method_exists($order, $setter)) {
+                    $order->$setter($this->sanitize_and_convert($value));
+                }
             }
         }
         
         // Process shipping fields
         foreach ($shipping_data as $key => $value) {
-            if (in_array('shipping_' . $key, $this->fields_to_process['shipping'])) {
-                $order->set_shipping_prop($key, $this->sanitize_and_convert($value));
+            $field_name = 'shipping_' . $key;
+            if (in_array($field_name, $this->fields_to_process['shipping']) && !empty($value)) {
+                $setter = 'set_shipping_' . $key;
+                if (method_exists($order, $setter)) {
+                    $order->$setter($this->sanitize_and_convert($value));
+                }
             }
+        }
+        
+        // Process order comments if provided
+        $order_comments = $request->get_param('customer_note');
+        if (!empty($order_comments)) {
+            $order->set_customer_note($this->sanitize_and_convert($order_comments));
         }
     }
     
@@ -405,11 +383,14 @@ final class CheckoutFieldUppercase {
             return;
         }
         
+        $asset_file = plugin_dir_path(__FILE__) . 'assets/js/checkout-uppercase.js';
+        $asset_version = file_exists($asset_file) ? filemtime($asset_file) : self::VERSION;
+        
         wp_enqueue_script(
             'wc-checkout-uppercase',
             plugin_dir_url(__FILE__) . 'assets/js/checkout-uppercase.js',
             ['jquery'],
-            self::VERSION,
+            $asset_version,
             true
         );
         
@@ -418,10 +399,11 @@ final class CheckoutFieldUppercase {
             'fields' => array_merge(
                 $this->fields_to_process['billing'],
                 $this->fields_to_process['shipping'],
-                $this->fields_to_process['order'] ?? []
+                $this->fields_to_process['order']
             ),
             'greekMap' => $this->greek_uppercase_map,
-            'nonce' => wp_create_nonce('wc-checkout-uppercase')
+            'nonce' => wp_create_nonce('wc-checkout-uppercase'),
+            'isBlockCheckout' => has_block('woocommerce/checkout')
         ]);
     }
 }
@@ -452,4 +434,16 @@ register_activation_hook(__FILE__, function() {
             ['response' => 200, 'back_link' => true]
         );
     }
+    
+    // Flush rewrite rules on activation
+    flush_rewrite_rules();
+});
+
+// Deactivation hook
+register_deactivation_hook(__FILE__, function() {
+    // Clean up any transients
+    delete_transient('wc_checkout_uppercase_notices');
+    
+    // Flush rewrite rules
+    flush_rewrite_rules();
 });

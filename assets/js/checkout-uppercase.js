@@ -1,7 +1,7 @@
 /**
  * WooCommerce Checkout Field Uppercase Converter - Frontend Script
  * Author: Mike Lvd
- * Version: 1.0.0
+ * Version: 1.0.1
  */
 
 (function($) {
@@ -9,8 +9,12 @@
     
     // Check if wcCheckoutUppercase object exists
     if (typeof wcCheckoutUppercase === 'undefined') {
+        console.warn('WC Checkout Uppercase: Configuration object not found');
         return;
     }
+    
+    // Track processed fields to avoid duplicate bindings
+    const processedFields = new Set();
     
     /**
      * Convert string to uppercase with Greek character support
@@ -20,27 +24,38 @@
             return '';
         }
         
-        // First, handle Greek characters using the map
-        let result = text;
-        if (wcCheckoutUppercase.greekMap) {
-            for (let lowercase in wcCheckoutUppercase.greekMap) {
-                if (wcCheckoutUppercase.greekMap.hasOwnProperty(lowercase)) {
-                    const uppercase = wcCheckoutUppercase.greekMap[lowercase];
-                    result = result.replace(new RegExp(lowercase, 'g'), uppercase);
+        try {
+            // First, handle Greek characters using the map
+            let result = text;
+            if (wcCheckoutUppercase.greekMap) {
+                for (let lowercase in wcCheckoutUppercase.greekMap) {
+                    if (wcCheckoutUppercase.greekMap.hasOwnProperty(lowercase)) {
+                        const uppercase = wcCheckoutUppercase.greekMap[lowercase];
+                        // Use global replace for all occurrences
+                        const regex = new RegExp(lowercase.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'g');
+                        result = result.replace(regex, uppercase);
+                    }
                 }
             }
+            
+            // Then convert using native toUpperCase (handles Latin and most Unicode)
+            result = result.toUpperCase();
+            
+            return result;
+        } catch (error) {
+            console.error('WC Checkout Uppercase: Error converting text', error);
+            return text.toUpperCase(); // Fallback to simple uppercase
         }
-        
-        // Then convert using native toUpperCase (handles Latin and most Unicode)
-        result = result.toUpperCase();
-        
-        return result;
     }
     
     /**
      * Apply uppercase conversion to a field
      */
     function applyUppercase(field) {
+        if (!field || field.readOnly || field.disabled) {
+            return;
+        }
+        
         const $field = $(field);
         const currentValue = $field.val();
         
@@ -49,8 +64,8 @@
         }
         
         // Get cursor position before conversion
-        const cursorPosition = field.selectionStart;
-        const lengthBefore = currentValue.length;
+        const cursorPosition = field.selectionStart || currentValue.length;
+        const selectionEnd = field.selectionEnd || cursorPosition;
         
         // Convert to uppercase
         const uppercaseValue = toUpperCase(currentValue);
@@ -60,62 +75,79 @@
             $field.val(uppercaseValue);
             
             // Restore cursor position
-            const lengthAfter = uppercaseValue.length;
-            const newPosition = cursorPosition + (lengthAfter - lengthBefore);
-            
             if (field.setSelectionRange) {
-                field.setSelectionRange(newPosition, newPosition);
+                try {
+                    field.setSelectionRange(cursorPosition, selectionEnd);
+                } catch (e) {
+                    // Ignore cursor positioning errors
+                }
             }
         }
     }
     
     /**
-     * Handle input event
+     * Handle input event - immediate conversion
      */
     function handleInput(e) {
         applyUppercase(e.target);
     }
     
     /**
-     * Initialize uppercase conversion using event delegation
+     * Handle paste event
      */
-    function initializeUppercaseFields() {
-        const fields = wcCheckoutUppercase.fields || [];
+    function handlePaste(e) {
+        const field = e.target;
+        // Small timeout to allow paste to complete
+        setTimeout(function() {
+            applyUppercase(field);
+        }, 10);
+    }
+    
+    /**
+     * Initialize field with uppercase conversion
+     */
+    function initializeField(fieldName) {
+        const $field = $('#' + fieldName);
         
-        // Remove any existing delegated handlers to prevent duplicates
-        $(document.body).off('.wcuppercase');
+        // Skip if field doesn't exist, is a select, or already processed
+        if (!$field.length || $field.is('select') || processedFields.has(fieldName)) {
+            return;
+        }
         
-        // Use event delegation for better performance and reliability
-        fields.forEach(function(fieldName) {
-            const selector = '#' + fieldName;
-            
-            // Only process text inputs, not selects
-            $(document.body).on('input.wcuppercase', selector + ':not(select)', handleInput);
-            
-            // Handle paste events
-            $(document.body).on('paste.wcuppercase', selector + ':not(select)', function(e) {
-                const field = e.target;
-                setTimeout(function() {
-                    applyUppercase(field);
-                }, 10);
-            });
-            
-            // Apply to existing values
-            const $field = $(selector);
-            if ($field.length && !$field.is('select') && $field.val()) {
-                applyUppercase($field[0]);
-            }
+        // Mark as processed
+        processedFields.add(fieldName);
+        
+        // Remove any existing handlers to avoid duplicates
+        $field.off('.wcuppercase');
+        
+        // Bind events for immediate conversion
+        $field.on('input.wcuppercase', handleInput);
+        $field.on('paste.wcuppercase', handlePaste);
+        
+        // Also handle blur event to ensure conversion
+        $field.on('blur.wcuppercase', function() {
+            applyUppercase(this);
         });
         
-        // Also apply to any existing field values after a short delay
-        setTimeout(function() {
-            fields.forEach(function(fieldName) {
-                const $field = $('#' + fieldName);
-                if ($field.length && !$field.is('select') && $field.val()) {
-                    applyUppercase($field[0]);
-                }
-            });
-        }, 100);
+        // Apply to existing value
+        if ($field.val()) {
+            applyUppercase($field[0]);
+        }
+    }
+    
+    /**
+     * Initialize all uppercase fields
+     */
+    function initializeAllFields() {
+        const fields = wcCheckoutUppercase.fields || [];
+        
+        // Clear processed fields set to allow re-initialization
+        processedFields.clear();
+        
+        // Initialize each field
+        fields.forEach(function(fieldName) {
+            initializeField(fieldName);
+        });
     }
     
     /**
@@ -123,44 +155,101 @@
      */
     $(document).ready(function() {
         // Initial setup
-        initializeUppercaseFields();
+        initializeAllFields();
         
-        // Reinitialize on checkout update
+        // Re-initialize on checkout update
         $(document.body).on('updated_checkout', function() {
-            // Small delay to ensure fields are ready
-            setTimeout(initializeUppercaseFields, 100);
+            setTimeout(initializeAllFields, 100);
+        });
+        
+        // Re-initialize on checkout initialization
+        $(document.body).on('init_checkout', function() {
+            setTimeout(initializeAllFields, 100);
         });
         
         // Handle country/state changes
         $(document.body).on('country_to_state_changed', function() {
-            setTimeout(initializeUppercaseFields, 200);
+            setTimeout(initializeAllFields, 100);
         });
         
         // Handle shipping address toggle
         $(document.body).on('change', '#ship-to-different-address-checkbox', function() {
             if ($(this).is(':checked')) {
-                setTimeout(initializeUppercaseFields, 200);
+                setTimeout(initializeAllFields, 100);
             }
         });
         
-        // Reinitialize periodically to catch any missed updates
-        setInterval(function() {
-            // Check if we're still on checkout
-            if ($('.woocommerce-checkout').length || $('.wc-block-checkout').length) {
-                initializeUppercaseFields();
+        // For checkout field that might be added dynamically
+        $(document.body).on('focus', 'input[type="text"], input[type="tel"], textarea', function() {
+            const fieldId = $(this).attr('id');
+            if (fieldId && wcCheckoutUppercase.fields.includes(fieldId)) {
+                initializeField(fieldId);
             }
-        }, 5000);
+        });
     });
     
     // Support for WooCommerce Blocks
-    if (window.wp && window.wp.data && window.wc && window.wc.blocksCheckout) {
-        // For block-based checkout
-        const { subscribe } = wp.data;
+    if (window.wp && window.wp.data) {
+        // Listen for block-based checkout updates
+        if (window.wp.data.subscribe) {
+            window.wp.data.subscribe(function() {
+                // Check if we're on block checkout
+                if ($('.wc-block-checkout').length || $('.wp-block-woocommerce-checkout').length) {
+                    // Re-initialize fields for block checkout
+                    setTimeout(initializeAllFields, 200);
+                }
+            });
+        }
+    }
+    
+    // Additional support for dynamically loaded content
+    if (window.MutationObserver) {
+        let observer = null;
         
-        subscribe(function() {
-            if ($('.wc-block-checkout').length) {
-                initializeUppercaseFields();
+        function setupObserver() {
+            const checkoutForm = document.querySelector('.woocommerce-checkout, .wc-block-checkout, .wp-block-woocommerce-checkout');
+            
+            if (!checkoutForm || observer) {
+                return;
             }
+            
+            observer = new MutationObserver(function(mutations) {
+                let shouldReinitialize = false;
+                
+                mutations.forEach(function(mutation) {
+                    if (mutation.type === 'childList' && mutation.addedNodes.length > 0) {
+                        mutation.addedNodes.forEach(function(node) {
+                            if (node.nodeType === 1) { // Element node
+                                // Check if any of our fields were added
+                                wcCheckoutUppercase.fields.forEach(function(fieldName) {
+                                    if (node.id === fieldName || node.querySelector('#' + fieldName)) {
+                                        shouldReinitialize = true;
+                                    }
+                                });
+                            }
+                        });
+                    }
+                });
+                
+                if (shouldReinitialize) {
+                    initializeAllFields();
+                }
+            });
+            
+            observer.observe(checkoutForm, {
+                childList: true,
+                subtree: true
+            });
+        }
+        
+        // Set up observer when checkout form is available
+        $(document).ready(function() {
+            setupObserver();
+            
+            // Also try to set up observer after checkout updates
+            $(document.body).on('updated_checkout init_checkout', function() {
+                setTimeout(setupObserver, 100);
+            });
         });
     }
     
