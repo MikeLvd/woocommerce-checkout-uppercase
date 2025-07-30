@@ -1,19 +1,23 @@
 # WooCommerce Checkout Field Uppercase Converter
 
 **Author:** Mike Lvd  
-**Version:** 1.0.1  
+**Version:** 1.0.2  
 **Requires:** WordPress 6.8+, WooCommerce 9.0+, PHP 8.0+  
 **License:** GPL v2 or later
 
 ## Description
 
-Automatically converts all lowercase characters to uppercase in WooCommerce checkout billing and shipping fields. Fully supports both Greek and Latin characters with real-time conversion as users type.
+A comprehensive WooCommerce checkout field formatter that automatically converts text fields to uppercase, formats phone numbers for readability, and ensures email addresses are lowercase. Fully supports both Greek and Latin characters with real-time conversion as users type.
 
 ## Features
 
-- ✅ **Real-time uppercase conversion** as users type with intelligent debouncing
+- ✅ **Real-time uppercase conversion** for text fields with intelligent cursor handling
 - ✅ **Full Greek alphabet support** including accented characters and ancient Greek
 - ✅ **Latin character support** for all standard alphabets
+- ✅ **Smart phone number formatting** for Greek numbers
+- ✅ **Automatic country code removal** (+30, 0030, 30)
+- ✅ **Readable phone format** (697 123 4567)
+- ✅ **Email lowercase enforcement** - Ensures email addresses are always lowercase
 - ✅ **Server-side validation** ensures data integrity
 - ✅ **HPOS compatible** - Works with High-Performance Order Storage
 - ✅ **Block-based checkout support** for modern WooCommerce stores
@@ -39,24 +43,17 @@ Automatically converts all lowercase characters to uppercase in WooCommerce chec
 
 ## Fields Affected
 
-### Billing Fields
-- First Name
-- Last Name
-- Company
-- Address Line 1
-- Address Line 2  
-- City
+### Text Fields (Uppercase Conversion)
+- **Billing**: First Name, Last Name, Company, Address Line 1, Address Line 2, City
+- **Shipping**: First Name, Last Name, Company, Address Line 1, Address Line 2, City
+- **Order**: Comments / Customer Notes
 
-### Shipping Fields
-- First Name
-- Last Name
-- Company
-- Address Line 1
-- Address Line 2
-- City
+### Phone Fields (Formatting Only)
+- Billing Phone
+- Shipping Phone
 
-### Other Fields
-- Order Comments / Customer Notes
+### Email Fields (Lowercase Conversion)
+- Billing Email
 
 **Note:** Country and State fields are NOT converted as they are select dropdowns, not text inputs.
 
@@ -76,8 +73,26 @@ Examples:
 - Νίκος → ΝΙΚΟΣ (not ΝΊΚΟΣ)
 - Ἀθῆναι → ΑΘΗΝΑΙ
 
+### Phone Number Formatting
+The plugin intelligently formats Greek phone numbers:
+- Removes country codes: +30, 0030, or just 30
+- Formats 10-digit numbers as XXX XXX XXXX
+- Works with both mobile (6xx) and landline (2xx) numbers
+- Handles various input formats seamlessly
+
+Examples:
+- +306971234567 → 697 123 4567
+- 00306971234567 → 697 123 4567
+- 306971234567 → 697 123 4567
+- 6971234567 → 697 123 4567
+
+### Email Handling
+- Converts all characters to lowercase
+- Trims whitespace
+- Applies WordPress email sanitization
+
 ### Performance Optimization
-- Client-side conversion uses debounced input handlers (300ms delay)
+- Client-side conversion uses immediate event handlers
 - MutationObserver for efficient dynamic field detection
 - WeakSet for memory-efficient element tracking
 - Server-side processing uses cached Transliterator instances
@@ -111,13 +126,28 @@ Examples:
 ### Filters
 - `woocommerce_checkout_posted_data` - AJAX field updates
 - `wc_checkout_uppercase_remove_greek_accents` - Control Greek accent removal (default: true)
+- `wc_checkout_uppercase_format_phones` - Enable/disable phone formatting (default: true)
+- `wc_checkout_uppercase_country_codes` - Customize country codes to remove (default: ['+30', '0030'])
 
 ### Customization Examples
 
 To keep Greek accents in uppercase (not recommended for Greek typography):
-
 ```php
 add_filter('wc_checkout_uppercase_remove_greek_accents', '__return_false');
+```
+
+To disable phone number formatting:
+```php
+add_filter('wc_checkout_uppercase_format_phones', '__return_false');
+```
+
+To add additional country codes for removal:
+```php
+add_filter('wc_checkout_uppercase_country_codes', function($codes) {
+    $codes[] = '+1';  // USA
+    $codes[] = '+44'; // UK
+    return $codes;
+});
 ```
 
 To add custom fields for processing:
@@ -129,28 +159,28 @@ add_filter('wc_checkout_uppercase_fields', function($fields) {
 });
 ```
 
-# Browser Support
+### Browser Support
 
 Chrome/Edge: Full support with optimal performance
 Firefox: Full support with optimal performance
 Safari: Full support including iOS
 Mobile browsers: Full support with touch-optimized input handling
 
-# Performance Metrics
+### Performance Metrics
 
-JavaScript bundle size: ~4KB minified
+JavaScript bundle size: ~6KB minified
 Average processing time: <5ms per field
 Memory footprint: Minimal with WeakSet usage
 No impact on page load time (async loading)
 
-# Known Limitations
+### Known Limitations
 
-Email fields are not converted (emails must remain lowercase)
+Country and State fields are not processed (they're select dropdowns)
 Postal codes are not converted (to maintain format requirements)
-Phone numbers are not affected
-Select dropdowns (Country/State) are not processed
+Credit card fields are not affected (for security)
+Select dropdowns and radio buttons are not processed
 
-# Troubleshooting
+### Troubleshooting
 Characters not converting
 
 Ensure PHP mbstring extension is enabled
@@ -158,71 +188,47 @@ For best results, install PHP intl extension
 Check that your database charset is utf8mb4
 Verify WooCommerce checkout fields haven't been heavily customized
 
-# JavaScript not working
+### JavaScript not working
 
 Check for JavaScript errors in browser console
 Ensure jQuery is loaded (WooCommerce dependency)
 Clear any caching plugins and browser cache
 Check for conflicts with other checkout field plugins
 
-# Block checkout issues
+### Phone formatting issues
+
+Ensure the phone number is entered without spaces initially
+Check if custom validation is interfering
+Verify the number follows Greek format (10 digits)
+
+### Block checkout issues
 
 Ensure you're using WooCommerce 8.3+ for full block support
 Check that the block checkout is properly rendered
 Look for console errors specific to React/blocks
 
-# Changelog
-1.0.1 - 2025-01-30
+### Frequently Asked Questions
+Q: Can I use this for other countries besides Greece?
+A: Yes! The uppercase conversion works for all countries. Phone formatting is currently optimized for Greece, but you can extend it using the provided filters.
+Q: Will this work with my custom checkout fields?
+A: The plugin processes standard WooCommerce fields. For custom fields, use the wc_checkout_uppercase_fields filter.
+Q: Does it work with multi-step checkout plugins?
+A: Yes, the plugin uses MutationObserver to detect dynamically loaded fields.
+Q: Is the plugin GDPR compliant?
+A: Yes, the plugin only formats data and doesn't store or transmit any personal information.
 
-Improved: Removed country/state fields from processing (select fields)
-Enhanced: Better Greek character support with ancient Greek
-Performance: Optimized with MutationObserver and WeakSet
-Performance: Debounced input handling
-Performance: Cached Transliterator instances
-Fixed: Recursive event handling issues
-Fixed: Cursor position preservation
-Added: Comprehensive error handling
-Added: Retry mechanism for initialization
-Security: Enhanced input validation
+### Changelog
 
-1.0.0 - 2025-01-29
-
-Initial release
-
-# Developer Notes
-Testing
-
-# Run PHP CodeSniffer
-phpcs --standard=WordPress woocommerce-checkout-uppercase.php
-
-# Run PHPStan
-phpstan analyse woocommerce-checkout-uppercase.php --level=8
-
-# JavaScript linting
-eslint assets/js/checkout-uppercase.js
-
-# Run PHP CodeSniffer
-phpcs --standard=WordPress woocommerce-checkout-uppercase.php
-
-# Run PHPStan
-phpstan analyse woocommerce-checkout-uppercase.php --level=8
-
-# JavaScript linting
-eslint assets/js/checkout-uppercase.js
-
-# Performance Testing
-The plugin has been tested with:
-
-1000+ simultaneous field updates
-Large Greek texts (Lorem Ipsum style)
-Various Unicode edge cases
-Mobile devices with slower processors
-
-# Support
+See CHANGELOG.md for detailed version history.
+Support
 For support, feature requests, or bug reports, please visit:
 https://github.com/mikelvd/wc-checkout-uppercase
 
-# License
+### Contributing
+
+Contributions are welcome! Please feel free to submit a Pull Request.
+
+### License
 This plugin is licensed under the GPL v2 or later.
 
 ```

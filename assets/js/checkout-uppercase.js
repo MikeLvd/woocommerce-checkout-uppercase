@@ -1,7 +1,7 @@
 /**
  * WooCommerce Checkout Field Uppercase Converter - Frontend Script
  * Author: Mike Lvd
- * Version: 1.0.1
+ * Version: 1.0.2
  */
 
 (function($) {
@@ -49,6 +49,66 @@
     }
     
     /**
+     * Convert string to lowercase
+     */
+    function toLowerCase(text) {
+        if (!text || typeof text !== 'string') {
+            return '';
+        }
+        
+        return text.toLowerCase();
+    }
+    
+    /**
+     * Format phone number
+     * Removes country code and formats as XXX XXX XXXX
+     */
+    function formatPhoneNumber(phone) {
+        if (!phone || typeof phone !== 'string' || !wcCheckoutUppercase.formatPhones) {
+            return phone;
+        }
+        
+        // Remove all non-numeric characters except + at the beginning
+        let cleaned = phone.replace(/[^\d+]/g, '');
+        cleaned = cleaned.replace(/\+(?!^)/g, '');
+        
+        // Remove country codes
+        const countryCodes = wcCheckoutUppercase.countryCodes || ['+30', '0030'];
+        for (let code of countryCodes) {
+            if (cleaned.startsWith(code)) {
+                cleaned = cleaned.substring(code.length);
+                break;
+            }
+        }
+        
+        // Special handling for Greek numbers starting with 30 (without + or 00)
+        // Check if it starts with 30 followed by a mobile (6) or landline (2) prefix
+        if (cleaned.length === 12 && cleaned.startsWith('30') && 
+            (cleaned.charAt(2) === '6' || cleaned.charAt(2) === '2')) {
+            cleaned = cleaned.substring(2);
+        }
+        
+        // Remove any leading zeros
+        cleaned = cleaned.replace(/^0+/, '');
+        
+        // Format Greek mobile numbers (10 digits starting with 6)
+        if (cleaned.length === 10 && cleaned.startsWith('6')) {
+            return cleaned.substring(0, 3) + ' ' + 
+                   cleaned.substring(3, 6) + ' ' + 
+                   cleaned.substring(6, 10);
+        }
+        // Format Greek landline numbers (10 digits starting with 2)
+        else if (cleaned.length === 10 && cleaned.startsWith('2')) {
+            return cleaned.substring(0, 3) + ' ' + 
+                   cleaned.substring(3, 6) + ' ' + 
+                   cleaned.substring(6, 10);
+        }
+        
+        // Return cleaned number if it doesn't match expected patterns
+        return cleaned;
+    }
+    
+    /**
      * Apply uppercase conversion to a field
      */
     function applyUppercase(field) {
@@ -86,10 +146,109 @@
     }
     
     /**
+     * Apply lowercase conversion to email field
+     */
+    function applyLowercase(field) {
+        if (!field || field.readOnly || field.disabled) {
+            return;
+        }
+        
+        const $field = $(field);
+        const currentValue = $field.val();
+        
+        if (!currentValue || typeof currentValue !== 'string') {
+            return;
+        }
+        
+        // Get cursor position before conversion
+        const cursorPosition = field.selectionStart || currentValue.length;
+        const selectionEnd = field.selectionEnd || cursorPosition;
+        
+        // Convert to lowercase and trim spaces
+        const lowercaseValue = toLowerCase(currentValue.trim());
+        
+        // Only update if value changed
+        if (lowercaseValue !== currentValue) {
+            $field.val(lowercaseValue);
+            
+            // Restore cursor position
+            if (field.setSelectionRange) {
+                try {
+                    // Adjust cursor position if spaces were trimmed
+                    const adjustedPosition = Math.min(cursorPosition, lowercaseValue.length);
+                    field.setSelectionRange(adjustedPosition, adjustedPosition);
+                } catch (e) {
+                    // Ignore cursor positioning errors
+                }
+            }
+        }
+    }
+    
+    /**
+     * Apply phone formatting to a field
+     */
+    function applyPhoneFormat(field) {
+        if (!field || field.readOnly || field.disabled) {
+            return;
+        }
+        
+        const $field = $(field);
+        const currentValue = $field.val();
+        
+        if (!currentValue || typeof currentValue !== 'string') {
+            return;
+        }
+        
+        // Get cursor position before formatting
+        const cursorPosition = field.selectionStart || currentValue.length;
+        
+        // Format the phone number
+        const formattedValue = formatPhoneNumber(currentValue);
+        
+        // Only update if value changed
+        if (formattedValue !== currentValue) {
+            $field.val(formattedValue);
+            
+            // Adjust cursor position based on formatting
+            if (field.setSelectionRange) {
+                try {
+                    // Calculate new cursor position considering added spaces
+                    let newPosition = cursorPosition;
+                    const spacesBeforeCursor = (currentValue.substring(0, cursorPosition).match(/ /g) || []).length;
+                    const spacesInFormatted = (formattedValue.substring(0, cursorPosition + spacesBeforeCursor).match(/ /g) || []).length;
+                    newPosition = cursorPosition + (spacesInFormatted - spacesBeforeCursor);
+                    
+                    // Make sure position is within bounds
+                    newPosition = Math.min(newPosition, formattedValue.length);
+                    newPosition = Math.max(0, newPosition);
+                    
+                    field.setSelectionRange(newPosition, newPosition);
+                } catch (e) {
+                    // Ignore cursor positioning errors
+                }
+            }
+        }
+    }
+    
+    /**
      * Handle input event - immediate conversion
      */
     function handleInput(e) {
         applyUppercase(e.target);
+    }
+    
+    /**
+     * Handle email input event - immediate lowercase conversion
+     */
+    function handleEmailInput(e) {
+        applyLowercase(e.target);
+    }
+    
+    /**
+     * Handle phone input event - immediate formatting
+     */
+    function handlePhoneInput(e) {
+        applyPhoneFormat(e.target);
     }
     
     /**
@@ -104,7 +263,29 @@
     }
     
     /**
-     * Initialize field with uppercase conversion
+     * Handle email paste event
+     */
+    function handleEmailPaste(e) {
+        const field = e.target;
+        // Small timeout to allow paste to complete
+        setTimeout(function() {
+            applyLowercase(field);
+        }, 10);
+    }
+    
+    /**
+     * Handle phone paste event
+     */
+    function handlePhonePaste(e) {
+        const field = e.target;
+        // Small timeout to allow paste to complete
+        setTimeout(function() {
+            applyPhoneFormat(field);
+        }, 10);
+    }
+    
+    /**
+     * Initialize field with appropriate conversion
      */
     function initializeField(fieldName) {
         const $field = $('#' + fieldName);
@@ -120,32 +301,70 @@
         // Remove any existing handlers to avoid duplicates
         $field.off('.wcuppercase');
         
-        // Bind events for immediate conversion
-        $field.on('input.wcuppercase', handleInput);
-        $field.on('paste.wcuppercase', handlePaste);
-        
-        // Also handle blur event to ensure conversion
-        $field.on('blur.wcuppercase', function() {
-            applyUppercase(this);
-        });
-        
-        // Apply to existing value
-        if ($field.val()) {
-            applyUppercase($field[0]);
+        // Check if this is an email field
+        if (wcCheckoutUppercase.emailFields && wcCheckoutUppercase.emailFields.includes(fieldName)) {
+            // Bind email lowercase conversion events
+            $field.on('input.wcuppercase', handleEmailInput);
+            $field.on('paste.wcuppercase', handleEmailPaste);
+            $field.on('blur.wcuppercase', function() {
+                applyLowercase(this);
+            });
+            
+            // Apply to existing value
+            if ($field.val()) {
+                applyLowercase($field[0]);
+            }
+        }
+        // Check if this is a phone field
+        else if (wcCheckoutUppercase.phoneFields && wcCheckoutUppercase.phoneFields.includes(fieldName)) {
+            // Bind phone formatting events
+            $field.on('input.wcuppercase', handlePhoneInput);
+            $field.on('paste.wcuppercase', handlePhonePaste);
+            $field.on('blur.wcuppercase', function() {
+                applyPhoneFormat(this);
+            });
+            
+            // Apply to existing value
+            if ($field.val()) {
+                applyPhoneFormat($field[0]);
+            }
+        } else {
+            // Bind uppercase conversion events
+            $field.on('input.wcuppercase', handleInput);
+            $field.on('paste.wcuppercase', handlePaste);
+            $field.on('blur.wcuppercase', function() {
+                applyUppercase(this);
+            });
+            
+            // Apply to existing value
+            if ($field.val()) {
+                applyUppercase($field[0]);
+            }
         }
     }
     
     /**
-     * Initialize all uppercase fields
+     * Initialize all fields
      */
     function initializeAllFields() {
-        const fields = wcCheckoutUppercase.fields || [];
-        
         // Clear processed fields set to allow re-initialization
         processedFields.clear();
         
-        // Initialize each field
+        // Initialize uppercase fields
+        const fields = wcCheckoutUppercase.fields || [];
         fields.forEach(function(fieldName) {
+            initializeField(fieldName);
+        });
+        
+        // Initialize phone fields
+        const phoneFields = wcCheckoutUppercase.phoneFields || [];
+        phoneFields.forEach(function(fieldName) {
+            initializeField(fieldName);
+        });
+        
+        // Initialize email fields
+        const emailFields = wcCheckoutUppercase.emailFields || [];
+        emailFields.forEach(function(fieldName) {
             initializeField(fieldName);
         });
     }
@@ -180,10 +399,15 @@
         });
         
         // For checkout field that might be added dynamically
-        $(document.body).on('focus', 'input[type="text"], input[type="tel"], textarea', function() {
+        $(document.body).on('focus', 'input[type="text"], input[type="tel"], input[type="email"], textarea', function() {
             const fieldId = $(this).attr('id');
-            if (fieldId && wcCheckoutUppercase.fields.includes(fieldId)) {
-                initializeField(fieldId);
+            if (fieldId) {
+                const allFields = (wcCheckoutUppercase.fields || [])
+                    .concat(wcCheckoutUppercase.phoneFields || [])
+                    .concat(wcCheckoutUppercase.emailFields || []);
+                if (allFields.includes(fieldId)) {
+                    initializeField(fieldId);
+                }
             }
         });
     });
@@ -221,7 +445,10 @@
                         mutation.addedNodes.forEach(function(node) {
                             if (node.nodeType === 1) { // Element node
                                 // Check if any of our fields were added
-                                wcCheckoutUppercase.fields.forEach(function(fieldName) {
+                                const allFields = (wcCheckoutUppercase.fields || [])
+                                    .concat(wcCheckoutUppercase.phoneFields || [])
+                                    .concat(wcCheckoutUppercase.emailFields || []);
+                                allFields.forEach(function(fieldName) {
                                     if (node.id === fieldName || node.querySelector('#' + fieldName)) {
                                         shouldReinitialize = true;
                                     }

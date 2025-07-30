@@ -2,8 +2,8 @@
 /**
  * Plugin Name: WooCommerce Checkout Field Uppercase Converter
  * Plugin URI: https://github.com/mikelvd/wc-checkout-uppercase
- * Description: Automatically converts all lowercase characters to uppercase in WooCommerce checkout billing and shipping fields. Supports both Greek and Latin characters.
- * Version: 1.0.1
+ * Description: Automatically converts all lowercase characters to uppercase in WooCommerce checkout billing and shipping fields. Supports both Greek and Latin characters with phone number formatting.
+ * Version: 1.0.2
  * Requires at least: 6.8
  * Requires PHP: 8.0
  * Author: Mike Lvd
@@ -34,7 +34,7 @@ final class CheckoutFieldUppercase {
     /**
      * Plugin version
      */
-    private const VERSION = '1.0.1';
+    private const VERSION = '1.0.2';
     
     /**
      * Plugin instance
@@ -70,6 +70,21 @@ final class CheckoutFieldUppercase {
         'order' => [
             'order_comments'
         ]
+    ];
+    
+    /**
+     * Phone fields to process
+     */
+    private array $phone_fields = [
+        'billing_phone',
+        'shipping_phone'
+    ];
+    
+    /**
+     * Email fields to process (lowercase only)
+     */
+    private array $email_fields = [
+        'billing_email'
     ];
     
     /**
@@ -206,6 +221,30 @@ final class CheckoutFieldUppercase {
     }
     
     /**
+     * Convert email to lowercase and sanitize
+     */
+    private function sanitize_email(string $email): string {
+        if (empty($email)) {
+            return $email;
+        }
+        
+        // Trim whitespace
+        $email = trim($email);
+        
+        // Convert to lowercase
+        if (function_exists('mb_strtolower')) {
+            $email = mb_strtolower($email, 'UTF-8');
+        } else {
+            $email = strtolower($email);
+        }
+        
+        // Additional email sanitization
+        $email = sanitize_email($email);
+        
+        return $email;
+    }
+    
+    /**
      * Sanitize and convert field value
      */
     private function sanitize_and_convert(mixed $value): string {
@@ -224,6 +263,49 @@ final class CheckoutFieldUppercase {
         
         // Convert to uppercase
         return $this->to_uppercase($value);
+    }
+    
+    /**
+     * Format Greek phone number
+     * Removes +30 or 0030 prefix and formats as XXX XXX XXXX
+     */
+    private function format_phone_number(string $phone): string {
+        if (empty($phone)) {
+            return $phone;
+        }
+        
+        // Allow customization of phone formatting
+        $format_phones = apply_filters('wc_checkout_uppercase_format_phones', true);
+        if (!$format_phones) {
+            return $phone;
+        }
+        
+        // Remove all non-numeric characters except + at the beginning
+        $phone = preg_replace('/[^\d+]/', '', $phone);
+        $phone = preg_replace('/\+(?!^)/', '', $phone);
+        
+        // Remove Greek country code (+30 or 0030)
+        $country_codes = apply_filters('wc_checkout_uppercase_country_codes', ['+30', '0030']);
+        foreach ($country_codes as $code) {
+            if (str_starts_with($phone, $code)) {
+                $phone = substr($phone, strlen($code));
+                break;
+            }
+        }
+        
+        // Remove any leading zeros
+        $phone = ltrim($phone, '0');
+        
+        // Format Greek mobile numbers (10 digits starting with 6)
+        if (strlen($phone) === 10 && str_starts_with($phone, '6')) {
+            // Format as XXX XXX XXXX
+            $phone = substr($phone, 0, 3) . ' ' . substr($phone, 3, 3) . ' ' . substr($phone, 6, 4);
+        } elseif (strlen($phone) === 10 && str_starts_with($phone, '2')) {
+            // Format landline numbers as XXX XXX XXXX
+            $phone = substr($phone, 0, 3) . ' ' . substr($phone, 3, 3) . ' ' . substr($phone, 6, 4);
+        }
+        
+        return $phone;
     }
     
     /**
@@ -256,6 +338,20 @@ final class CheckoutFieldUppercase {
                 $_POST[$field] = $this->sanitize_and_convert($_POST[$field]);
             }
         }
+        
+        // Process phone fields
+        foreach ($this->phone_fields as $field) {
+            if (isset($_POST[$field])) {
+                $_POST[$field] = $this->format_phone_number($_POST[$field]);
+            }
+        }
+        
+        // Process email fields (lowercase)
+        foreach ($this->email_fields as $field) {
+            if (isset($_POST[$field])) {
+                $_POST[$field] = $this->sanitize_email($_POST[$field]);
+            }
+        }
     }
     
     /**
@@ -272,6 +368,20 @@ final class CheckoutFieldUppercase {
         foreach ($all_fields as $field) {
             if (isset($data[$field]) && !empty($data[$field])) {
                 $data[$field] = $this->sanitize_and_convert($data[$field]);
+            }
+        }
+        
+        // Process phone fields
+        foreach ($this->phone_fields as $field) {
+            if (isset($data[$field]) && !empty($data[$field])) {
+                $data[$field] = $this->format_phone_number($data[$field]);
+            }
+        }
+        
+        // Process email fields
+        foreach ($this->email_fields as $field) {
+            if (isset($data[$field]) && !empty($data[$field])) {
+                $data[$field] = $this->sanitize_email($data[$field]);
             }
         }
         
@@ -332,6 +442,23 @@ final class CheckoutFieldUppercase {
             }
         }
         
+        // Process phone numbers
+        $billing_phone = $order->get_billing_phone();
+        if (!empty($billing_phone)) {
+            $order->set_billing_phone($this->format_phone_number($billing_phone));
+        }
+        
+        $shipping_phone = $order->get_shipping_phone();
+        if (!empty($shipping_phone)) {
+            $order->set_shipping_phone($this->format_phone_number($shipping_phone));
+        }
+        
+        // Process email
+        $billing_email = $order->get_billing_email();
+        if (!empty($billing_email)) {
+            $order->set_billing_email($this->sanitize_email($billing_email));
+        }
+        
         // Process order comments (customer note)
         $customer_note = $order->get_customer_note();
         if (!empty($customer_note)) {
@@ -368,6 +495,20 @@ final class CheckoutFieldUppercase {
             }
         }
         
+        // Process phone numbers
+        if (!empty($billing_data['phone'])) {
+            $order->set_billing_phone($this->format_phone_number($billing_data['phone']));
+        }
+        
+        if (!empty($shipping_data['phone'])) {
+            $order->set_shipping_phone($this->format_phone_number($shipping_data['phone']));
+        }
+        
+        // Process email
+        if (!empty($billing_data['email'])) {
+            $order->set_billing_email($this->sanitize_email($billing_data['email']));
+        }
+        
         // Process order comments if provided
         $order_comments = $request->get_param('customer_note');
         if (!empty($order_comments)) {
@@ -401,9 +542,13 @@ final class CheckoutFieldUppercase {
                 $this->fields_to_process['shipping'],
                 $this->fields_to_process['order']
             ),
+            'phoneFields' => $this->phone_fields,
+            'emailFields' => $this->email_fields,
             'greekMap' => $this->greek_uppercase_map,
             'nonce' => wp_create_nonce('wc-checkout-uppercase'),
-            'isBlockCheckout' => has_block('woocommerce/checkout')
+            'isBlockCheckout' => has_block('woocommerce/checkout'),
+            'countryCodes' => apply_filters('wc_checkout_uppercase_country_codes', ['+30', '0030']),
+            'formatPhones' => apply_filters('wc_checkout_uppercase_format_phones', true)
         ]);
     }
 }
